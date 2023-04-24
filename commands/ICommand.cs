@@ -2,17 +2,7 @@
 {
     internal interface ICommand
     {
-        private List<string> Args
-        {
-            get
-            {
-                return new List<string>();
-            }
-            set
-            {
-                
-            }
-        }
+        List<string> Args { get; set; }
 
         string Execute();
     }
