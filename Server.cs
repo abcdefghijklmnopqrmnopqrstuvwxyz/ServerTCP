@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using Server.commands;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
@@ -7,18 +8,19 @@ namespace Server
 {
     internal class Server
     {
-        private string Log = "D:\\Boháč_C3b\\Server\\depc\\Log.txt";
         private string Blocked = "D:\\Boháč_C3b\\Server\\depc\\Blocked.json";
+        private Dictionary<string, ICommand> myCommands = new Dictionary<string, ICommand>();
         private TcpListener myServer;
         private bool isRunning;
-        private string IP;
-        private string user;
 
         public Server(int port)
         {
             myServer = new TcpListener(System.Net.IPAddress.Any, port);
             myServer.Start();
             isRunning = true;
+            Login.IP = Dns.GetHostByName(Dns.GetHostName()).AddressList[0].ToString();
+            myCommands.Add("who", new WhoCommand());
+            myCommands.Add("last", new LastCommand());
             ServerLoop();
         }
 
@@ -32,51 +34,12 @@ namespace Server
             }
         }
 
-        private void LogUser(string name)
-        {
-            try
-            {
-                FileStream fileStream = File.Open(Log, FileMode.Append, FileAccess.Write);
-                StreamWriter fileWriter = new StreamWriter(fileStream);
-                fileWriter.WriteLine(name + " - " + System.DateTime.Now.ToString() + " - " + IP);
-                fileWriter.Flush();
-                fileWriter.Close();
-            }
-            catch (IOException ex)
-            {
-                Console.WriteLine(ex);
-            }
-        }
-
-        private bool TryLogIn(string name, string pass)
-        {
-            Login l = new Login();
-            List<Users> list = l.LoadUsers();
-
-            foreach (var x in list)
-            {
-                if (x.Name == name && x.Password == pass)
-                {
-                    user = name;
-                    return true;
-                }
-            }
-            return false;
-        }
-
         private void BlockIp()
         {
-            try
-            {
-                List<string> ips = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(Blocked));
-                ips.Add(IP);
-                string Text = JsonSerializer.Serialize(ips);
-                File.WriteAllText(Blocked, Text);
-            }
-            catch
-            {
-                Console.WriteLine("Blocked IPs is empty;");
-            }
+            List<string> ips = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(Blocked));
+            ips.Add(Login.IP);
+            string Text = JsonSerializer.Serialize(ips);
+            File.WriteAllText(Blocked, Text);
         }
 
         private List<string> GetBlockedIp()
@@ -84,27 +47,26 @@ namespace Server
             return JsonSerializer.Deserialize<List<string>>(File.ReadAllText(Blocked));
         }
 
+        private bool IsBlocked()
+        {
+            foreach (var x in GetBlockedIp())
+            {
+                if (Login.IP == x)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private void ClientLoop(TcpClient client)
         {
             StreamReader reader = new StreamReader(client.GetStream(), Encoding.UTF8);
             StreamWriter writer = new StreamWriter(client.GetStream(), Encoding.UTF8);
 
-            string hostName = Dns.GetHostName();
-            IP = Dns.GetHostByName(hostName).AddressList[0].ToString();
+            Login login = new Login();
 
-            bool blocked = false;
-
-            foreach (var x in GetBlockedIp())
-            {
-                if (IP == x)
-                {
-                    writer.WriteLine("Your IP is blocked;");
-                    writer.Flush();
-                    blocked = true;
-                }
-            }
-
-            if (!blocked)
+            if (!IsBlocked())
             {
                 for (int i = 0; i < 3; i++)
                 {
@@ -114,9 +76,9 @@ namespace Server
                     writer.Write("Pssword: ");
                     writer.Flush();
                     string pass = reader.ReadLine();
-                    if (TryLogIn(name, pass))
+                    if (login.TryLogIn(name, pass))
                     {
-                        LogUser(name);
+                        login.LogUser(name);
                         writer.WriteLine("Connected;");
                         writer.Flush();
                         break;
@@ -131,7 +93,7 @@ namespace Server
                     }
                 }
 
-                if (!blocked)
+                if (!IsBlocked())
                 {
                     bool clientConnect = true;
                     string? data;
@@ -139,24 +101,12 @@ namespace Server
                     {
                         data = reader.ReadLine();
                         data = data?.ToLower();
-                        if (data == "who")
+                        if (myCommands.ContainsKey(data))
                         {
-                            writer.WriteLine("Active user: " + user + ";");
+                            writer.WriteLine(myCommands[data].Execute());
                             writer.Flush();
                         }
-                        else if (data == "uptime")
-                        {
-
-                        }
-                        else if (data == "stats")
-                        {
-
-                        }
-                        else if (data == "last")
-                        {
-
-                        }
-                        else if (data == "exit")
+                        else if (data.Equals("exit"))
                         {
                             clientConnect = false;
                         }
@@ -167,11 +117,21 @@ namespace Server
                         }
                     }
                 }
+                else
+                {
+                    writer.WriteLine("Your IP is blocked;");
+                    writer.Flush();
+                }
             }
-            
+            else
+            {
+                writer.WriteLine("Your IP is blocked;");
+                writer.Flush();
+            }
+
             writer.WriteLine("Disconnected;");
             writer.Flush();
         }
-    }
 
+    }
 }
